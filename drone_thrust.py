@@ -1,13 +1,21 @@
 import pygame
+import numpy as np
+
+def rotate_point_around_origin(x,y,theta):
+    return (
+        x * np.cos(theta) + y * -1 * np.sin(theta),
+        x * np.sin(theta) + y *      np.cos(theta)
+    )
 
 class Drone:
-    def __init__(self, x, y, vx, vy, mass, max_thrust=3):
+    def __init__(self, x, y, vx, vy,theta=1,omega=1, mass=1, max_thrust=3):
         
         # Object parameters (will not change)
         self.mass = mass # in [kg]
         self.max_thrust = max_thrust * mass # in [N]
         self.thrust = 0
-
+        self.omega = omega # in [rad/s]
+        self.theta = theta # in [rad]
 
         # State variables (these will change during the life of the object)
         self.x = x # in [m]
@@ -19,11 +27,17 @@ class Drone:
         ''' steps the simulation of this ball. dt is in seconds '''
 
         # Forces are represented in Newtons. 
-        fx = 0
-        fy = -9.81 * self.mass
+        fxt = - np.sin(self.theta) * thrust * self.max_thrust
+        fyt = np.cos(self.theta) * thrust * self.max_thrust
+        fx = fxt
+        fy = -9.81 * self.mass + fyt
         ax = fx / self.mass 
-        ay = fy / self.mass + thrust * self.max_thrust * dt
+        ay = fy / self.mass 
         self.thrust = thrust
+    
+        self.omega = self.omega + 0 * dt # no angular acceleration for now
+        self.theta = self.theta + self.omega * dt
+
         self.vx = self.vx + ax * dt
         self.vy = self.vy + ay * dt
         self.x = self.x + self.vx * dt
