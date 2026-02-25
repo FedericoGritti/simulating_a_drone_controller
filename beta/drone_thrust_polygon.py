@@ -83,4 +83,4 @@ class Drone:
             pygame.draw.line(surf, (255,0,0), start_pos = to_pixel_coords(self.x,start_2), end_pos=to_pixel_coords(self.x,end_2),width = 10) 
             pygame.draw.line(surf, (255,0,0), start_pos = to_pixel_coords(start_3,self.y), end_pos=to_pixel_coords(end_3,self.y),width = 10) 
         else:
-            pygame.draw.line(surf, (0,0,0), start_pos = to_pixel_coords(self.x,self.y), end_pos=to_pixel_coords(self.x, self.y-0.5))r
+            pygame.draw.line(surf, (0,0,0), start_pos = to_pixel_coords(self.x,self.y), end_pos=to_pixel_coords(self.x, self.y-0.5))
