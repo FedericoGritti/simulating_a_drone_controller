@@ -8,7 +8,7 @@ def rotate_point_around_origin(x, y, theta):
 points = [(-.5,-.1), (+.5,-.1), (+.4,+.1), (-.4,+.1), (-.5,-.1)]
 
 class PIDController():
-    def __init__(self, Kp_height=1, Ki_height=0.1, Kd_height=0.1, Kp_orientation=1, Ki_orientation=0.1, Kd_orientation=0.1):
+    def __init__(self, Kp_height=1, Ki_height=0.1, Kd_height=0.1, Kp_orientation=1, Ki_orientation=0.1, Kd_orientation=0.1, is_on=True):
         self.Kp_height = Kp_height
         self.Ki_height = Ki_height
         self.Kd_height = Kd_height
@@ -16,7 +16,7 @@ class PIDController():
         self.last_error_height = 0
         self.thrust_height = 0
         
-        self.Kp_orientation = Kp_orientation
+        self.Kp_orientation = Kp_orientation 
         self.Ki_orientation = Ki_orientation 
         self.Kd_orientation = Kd_orientation
         self.integral_orientation = 0
@@ -26,11 +26,13 @@ class PIDController():
         self.main_thrust = 0
         self.left_thrust = 0
         self.right_thrust = 0
-        self.is_on = False
+        self.is_on = is_on
 
 
 
     def step(self, desired_height, desired_orientation, error_height, error_orientation, dt):
+        if not self.is_on:
+            return 0, 0
         error_height = desired_height - error_height
         error_orientation = desired_orientation - error_orientation
         self.integral_height += error_height * dt
@@ -61,25 +63,30 @@ class Drone:
         self.vy = vy
         self.theta = theta
         self.omega = omega
-        self.controller = PIDController(Kp_height=1, Ki_height=0, Kd_height=0, Kp_orientation=1, Ki_orientation=0, Kd_orientation=0)
-        self.controller.is_on = True
+        self.controller = PIDController(Kp_height=1, Ki_height=0.1 , Kd_height=0.1, Kp_orientation=1, Ki_orientation=0.1, Kd_orientation=0.1, is_on=True)
         self.desired_height = 0
         self.desired_orientation = 0
        
 
     def step(self, main_thrust, left_thrust, right_thrust,dt):
+        #we set a desired orientation and we calculate the error in the controller step
         thrust_height, thrust_orientation = self.controller.step(self.desired_height, self.desired_orientation, self.y, self.theta, dt)
-        total = (thrust_height + main_thrust) * self.max_thrust
-        
+        total = (thrust_height + main_thrust) * self.max_thrust 
+        #we calculate the force on the acceleration instead of the force because it is more efficient, in fact
+        #F = m * a => a = F / m
+        #the force depends on the orientation so we decompose it in x and y
+        #we use the negative np.sin because the angle is measured from the y axis
         ax = -np.sin(self.theta) * total / self.mass
         ay = (np.cos(self.theta) * total - 9.81 * self.mass) / self.mass
          
         self.vx += ax * dt
         self.vy += ay * dt
+        #we calculate the position by derivating the velocity which is also the derivative of the acceleration
         self.x += self.vx * dt
         self.y += self.vy * dt
         
-        torque = ( thrust_orientation + left_thrust - right_thrust) * self.max_thrust * self.L
+        torque = ( thrust_orientation + left_thrust - right_thrust) * self.max_thrust
+        #dividing for the inertia because torque = I * alpha => alpha = torque / I
         self.omega += (torque / self.I) * dt
         self.theta += self.omega * dt
 
@@ -90,9 +97,10 @@ class Drone:
             return x * px_per_m + w/2, -y * px_per_m + h/2
         
         s = size * (0.5 + 0.5 * thrust_val)
+        #the points describe a inverted triangle with the base at the top and the vertex at the bottom
         pts = [(offset_x - s*0.4, -0.1), (offset_x + s*0.4, -0.1), (offset_x, -0.1 - s)]
         
-        rotated_pts = []
+        rotated_pts = [] 
         for px, py in pts:
             rx, ry = rotate_point_around_origin(px, py, self.theta)
             rotated_pts.append(to_px(rx + self.x, ry + self.y))
@@ -155,6 +163,7 @@ drone_list = []
 px_per_m = 100
 
 
+
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -163,32 +172,36 @@ while running:
             if event.key == pygame.K_q:
                 running = False
             if event.key == pygame.K_SPACE: 
-                drone_list.append(Drone(x=0,y=0,vx=random.uniform(-0.5 ,0.5),vy=random.uniform(-0.5,0.5),theta=random.uniform(-1,1),omega= random.uniform(-1,1),max_thrust=max_thrust, L=2 ))
+                drone_list.append(Drone(x=0,y=0,vx=random.uniform(-0.5 ,0.5)
+                ,vy=random.uniform(-0.5,0.5),theta=random.uniform(-1,1),
+                omega= random.uniform(-1,1),max_thrust=max_thrust, L=random.randint(1,3), 
+                controller=PIDController(Kp_height=1, Ki_height=0 , Kd_height=0, Kp_orientation=1, 
+                Ki_orientation=0, Kd_orientation=0, is_on=True)))
 
-            if event.key == pygame.K_e:
+            if event.key == pygame.K_c:
                 drone_list = []
  
             #this is for pid control
-            #for d in drone_list:
-                # if event.key == pygame.K_UP: 
-                #     drone_list[0].desired_height += 0.1
-                # if event.key == pygame.K_DOWN:
-                #     drone_list[0].desired_height -= 0.1
-                # if event.key == pygame.K_LEFT:
-                #     drone_list[0].desired_orientation += 0.1
-                # if event.key == pygame.K_RIGHT: 
-                #     drone_list[0].desired_orientation -= 0.1
+            for d in drone_list:
+                if event.key == pygame.K_UP: 
+                    drone_list[0].desired_height += 1
+                if event.key == pygame.K_DOWN:
+                    drone_list[0].desired_height -= 1
+                if event.key == pygame.K_LEFT:
+                    drone_list[0].desired_orientation += 1
+                if event.key == pygame.K_RIGHT: 
+                    drone_list[0].desired_orientation -= 1
 
             #this is for manual control
-            for d in drone_list:
-                if event.key == pygame.K_UP:
-                    d.controller.main_thrust = 0.5
-                if event.key == pygame.K_DOWN:
-                    d.controller.main_thrust = -0.5
-                if event.key == pygame.K_LEFT: 
-                    d.controller.left_thrust = 0.3
-                if event.key == pygame.K_RIGHT:
-                    d.controller.right_thrust = 0.3
+            # for d in drone_list:
+            #     if event.key == pygame.K_UP:
+            #         d.controller.main_thrust = 1
+            #     if event.key == pygame.K_DOWN:
+            #         d.controller.main_thrust = -1
+            #     if event.key == pygame.K_LEFT: 
+            #         d.controller.left_thrust = 1
+            #     if event.key == pygame.K_RIGHT:
+            #         d.controller.right_thrust = 1 
 
 
     keys = pygame.key.get_pressed() 
