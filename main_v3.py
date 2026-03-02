@@ -13,10 +13,18 @@ points = [(-.5,-.1), (+.5,-.1), (+.4,+.1), (-.4,+.1), (-.5,-.1)]
 
 
 class PIDController():
-    def __init__(self, kp, ki, kd):
+    def __init__(self, kp, ki, kd, kp_y=None, ki_y=None, kd_y=None, kp_theta=None, ki_theta=None, kd_theta=None):
         self.kp = kp
-        self.ki = ki
-        self.kd = kd
+        self.ki = ki 
+        self.kd = kd 
+
+        self.kp_y = kp_y if kp_y is not None else kp
+        self.ki_y = ki_y if ki_y is not None else ki
+        self.kd_y = kd_y if kd_y is not None else kd 
+
+        self.kp_theta = kp_theta if kp_theta is not None else kp 
+        self.ki_theta = 0
+        self.kd_theta = kd_theta if kd_theta is not None else kd 
         
         self.integral_x = 0
         self.last_error_x = 0
@@ -51,8 +59,8 @@ class PIDController():
     def step(self, desidered_y, error_y, theta, dt, desidered_x=0, error_x=0, desidered_theta=0):
         self.thrust_x, self.integral_x, self.last_error_x = self.calculate_pid(desidered_x, error_x, self.kp, self.ki, self.kd, self.integral_x, self.last_error_x, dt)
         target_tilt = np.clip(-0.5 * self.thrust_x, -0.5, 0.5) + desidered_theta
-        self.thrust_orientation, self.integral_orientation, self.last_error_orientation = self.calculate_pid(target_tilt, theta, self.kp, self.ki, self.kd, self.integral_orientation, self.last_error_orientation, dt)
-        self.thrust_y, self.integral_y, self.last_error_y = self.calculate_pid(desidered_y, error_y, self.kp, self.ki, self.kd, self.integral_y, self.last_error_y, dt)
+        self.thrust_orientation, self.integral_orientation, self.last_error_orientation = self.calculate_pid(target_tilt, theta, self.kp_theta, self.ki_theta, self.kd_theta, self.integral_orientation, self.last_error_orientation, dt)
+        self.thrust_y, self.integral_y, self.last_error_y = self.calculate_pid(desidered_y, error_y, self.kp_y, self.ki_y, self.kd_y, self.integral_y, self.last_error_y, dt)
         
         return self.thrust_x, self.thrust_y, self.thrust_orientation
 
@@ -91,7 +99,7 @@ class Drone:
         self.path_time = 0
         self.circle_mode = False
         self.circle_radius = 3.0
-        self.circle_speed = 1
+        self.circle_speed = 0.5
         self.circle_center = (0, 0)
 
         # Smoothed thrust values for visual representation
@@ -125,44 +133,48 @@ class Drone:
             self.desired_y, self.y, self.theta, dt, self.desired_x, self.x, self.desired_orientation
         )
 
-        #we take the maxium of the thrust values to ensure that the motors only push up
+        #we take the maxium of the thrust values to ensure that the motors only push up 
         #otherwise the drone would fall becuase the motors would push down
-        #or it will flip 
-        self.main_thrust = max(0, min(2.0, 0.5   * self.thrust_y + main_thrust))
-        self.left_thrust = max(0, min(2.0, -1   * self.thrust_orientation + left_thrust))
+        #or it will flip
+        #but also we take the minimum of 2.0 to ensure that the motors do not push too hard
+        #and cause the drone to flip
+
+        self.main_thrust = max(0, min(2.0, 1 * self.thrust_y + main_thrust)) # we add the manual controls to the controller output
+        self.left_thrust = max(0, min(2.0, -1 * self.thrust_orientation  + left_thrust))
         self.right_thrust = max(0, min(2.0, 1 * self.thrust_orientation + right_thrust))
 
         total = self.main_thrust * self.max_thrust #in Newtons
         ax = -np.sin(self.theta) * total / self.mass #in Newtons
         ay = (np.cos(self.theta) * total - 9.81 * self.mass) / self.mass #in Newtons
          
-        # Add drag to help the drone brake naturally
-        ax -= self.drag * self.vx
+        # Add drag to help the drone brake naturally because the no wind effect was causing the robot to move too freely
+        ax -= self.drag * self.vx 
         ay -= self.drag * self.vy
 
-        self.vx += ax * dt
+        self.vx += ax * dt # to calculate the velocity it's just taking the derivative of the velocity
         self.vy += ay * dt
-        
-        # Hard cap the maximum lateral and vertical speeds
+        #we want to limit the maxium velocity 
         self.vx = max(-self.max_speed, min(self.max_speed, self.vx))
         self.vy = max(-self.max_speed, min(self.max_speed, self.vy))
         
-        self.x += self.vx * dt
+        self.x += self.vx * dt # to calculate the position it's just taking the derivative of the velocity
         self.y += self.vy * dt
+
+
 
             # Correct torque: Right motor (+L) pushes UP gives positive (CCW) torque
         # Left motor (-L) pushes UP gives negative (CW) torque
         # So torque = (Right - Left) * L
         torque = (self.right_thrust - self.left_thrust) * self.max_thrust * self.L 
          
-        self.omega += (torque / self.I) * dt
+        self.omega += (torque / self.I) * dt #the inertia is the resistance to change in angular velocity, so by dividing by the inertia we reduce the effect of the torque
         self.theta += self.omega * dt
 
-        # Update smoothed thrust values for visual smoothing (low-pass filter)
+        # Update smoothed thrust values for visual ONLY visual smoothing (low-pass filter)
         # alpha determines the smoothing speed (lower = smoother/slower)
-        alpha = 0.05
+        alpha = 1
         self.s_main_thrust += (self.main_thrust - self.s_main_thrust) * alpha 
-        self.s_left_thrust += (self.left_thrust - self.s_left_thrust) * alpha 
+        self.s_left_thrust += (self.left_thrust - self.s_left_thrust) * alpha  
         self.s_right_thrust += (self.right_thrust - self.s_right_thrust) * alpha
 
 
@@ -172,9 +184,7 @@ class Drone:
         def to_px(x, y): 
             return x * px_per_m + w/2, -y * px_per_m + h/2
         
-        # More natural scaling  
         s = size * thrust_val  
-        
         pts = [(offset_x - s*0.4, -0.1), (offset_x + s*0.4, -0.1), (offset_x, -0.1 - s)]
         
         rotated_pts = [] 
@@ -192,11 +202,12 @@ class Drone:
             f"Thrust Y: {self.thrust_y:.2f}",
             f"Orientation: {self.theta:.2f}",
             f"Circle Mode: {'ON' if self.circle_mode else 'OFF'}",
+            f"Circle Speed: {self.circle_speed:.2f}",
             f"Random Points Mode: {'ON' if self.random_points_mode else 'OFF'}",
             f"L/R Thrust: {self.left_thrust:.2f}/{self.right_thrust:.2f}",
-            f"KP: {self.controller.kp:.2f}",
-            f"KI: {self.controller.ki:.2f}",
-            f"KD: {self.controller.kd:.2f}"
+            f"PID X (1-6): {self.controller.kp:.2f}, {self.controller.ki:.2f}, {self.controller.kd:.2f}",
+            f"PID Y (NP 1-6): {self.controller.kp_y:.2f}, {self.controller.ki_y:.2f}, {self.controller.kd_y:.2f}",
+            f"PID Angle (U-]): {self.controller.kp_theta:.2f}, {self.controller.ki_theta:.2f}, {self.controller.kd_theta:.2f}"
         ]
         for i, text_str in enumerate(states):  
             text = font.render(text_str, True, (255, 255, 255))
@@ -226,6 +237,18 @@ class Drone:
             for i, point in enumerate(self.random_points):
                 px, py = to_px(point[0], point[1])
                 pygame.draw.circle(surf, (255, 0, 0), (px, py), 5)
+        
+        # Draw current target (manual or circle point)
+        tx, ty = to_px(self.desired_x, self.desired_y)
+        pygame.draw.circle(surf, (0, 255, 0), (int(tx), int(ty)), 6)
+        font = pygame.font.Font(None, 22)
+        target_text = font.render(f"Target: ({self.desired_x:.2f}, {self.desired_y:.2f})", True, (0, 255, 0))
+        surf.blit(target_text, (tx + 12, ty - 10))
+
+        # Label drone current position
+        dx, dy = to_px(self.x, self.y)
+        drone_text = font.render(f"Drone: ({self.x:.2f}, {self.y:.2f})", True, (150, 150, 255))
+        surf.blit(drone_text, (dx + 12, dy + 15))
   
         self.draw_controller_state(surf, px_per_m) 
         
@@ -236,8 +259,6 @@ class Drone:
 
 
 
-
- 
 # pygame setup
 pygame.init()
 screen = pygame.display.set_mode((1280, 720)) 
@@ -249,7 +270,6 @@ drone_list = []
 px_per_m = 70
 
 
-
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -257,7 +277,7 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_q:
                 running = False 
-            if event.key == pygame.K_SPACE: 
+            if event.key == pygame.K_SPACE:  
                 drone_list.append(Drone(x=0,y=0,vx=random.uniform(-1 ,1),vy=random.uniform(-1,1),theta=0,omega= random.uniform(-1,1),max_thrust=max_thrust, L=0.5)  )
 
             if event.key == pygame.K_c:
@@ -281,10 +301,15 @@ while running:
                     d.circle_center = common_center
                     # Calculate path_time based on current position relative to center
                     # to avoid jumps when activating circle mode
-                    dx = d.x - common_center[0]
-                    dy = d.y - common_center[1]
-                    
-                    d.path_time = math.atan2(dy, dx) / d.circle_speed
+                    drone_relative_x = d.x - common_center[0]
+                    drone_relative_y = d.y - common_center[1]
+                    # we need the angle because the drone is rotating and we want to start the circle from the current angle
+                    # so atan2 gives us the angle of the vector (dx, dy)
+                    # we divide the angle by the circle speed to get the time it takes to complete the circle
+                    # because we need to update the desired position in the circle
+
+                    angle = math.atan2(drone_relative_y, drone_relative_x)
+                    d.path_time = angle / d.circle_speed
 
             if event.key == pygame.K_e:
                 for drone in drone_list:
@@ -308,6 +333,40 @@ while running:
                     d.controller.kd -= 0.1
                 if event.key == pygame.K_6:
                     d.controller.kd += 0.1
+                
+                # Tune Height (Y) PID with Numpad 1-6
+                if event.key == pygame.K_KP1:
+                    d.controller.kp_y -= 0.1
+                if event.key == pygame.K_KP2:
+                    d.controller.kp_y += 0.1
+                if event.key == pygame.K_KP3:
+                    d.controller.ki_y -= 0.1
+                if event.key == pygame.K_KP4:
+                    d.controller.ki_y += 0.1
+                if event.key == pygame.K_KP5:
+                    d.controller.kd_y -= 0.1
+                if event.key == pygame.K_KP6:
+                    d.controller.kd_y += 0.1
+                
+                # Tune Orientation (Theta) PID with U/I, O/P, [/]
+                if event.key == pygame.K_u:
+                    d.controller.kp_theta -= 0.1
+                if event.key == pygame.K_i:
+                    d.controller.kp_theta += 0.1
+                if event.key == pygame.K_o:
+                    d.controller.ki_theta -= 0.1
+                if event.key == pygame.K_p:
+                    d.controller.ki_theta += 0.1
+                if event.key == pygame.K_LEFTBRACKET:
+                    d.controller.kd_theta -= 0.1
+                if event.key == pygame.K_RIGHTBRACKET:
+                    d.controller.kd_theta += 0.1
+                
+                # Tune circle speed with keys 8 and 9
+                if event.key == pygame.K_8:
+                    d.circle_speed -= 0.1
+                if event.key == pygame.K_9:
+                    d.circle_speed += 0.1
             
 
 
